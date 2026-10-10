@@ -12,13 +12,12 @@ def get_data(nombre_archivo: str = ARCHIVO) -> pd.DataFrame:
 
     # IUCR y FBI Code son alfanuméricos, pandas los tiene que leer como string, no ints
     # Date y Updated On son fechas
-    df = pd.read_csv(
+    return pd.read_csv(
         ruta,
         dtype={"IUCR": str, "FBI Code": str},
-        parse_dates=["Date"],
-        date_format="%m/%d/%Y %I:%M:%S %p",
+        parse_dates=["Date", "Updated On"],
+        date_format={
+            "Date": "%m/%d/%Y %I:%M:%S %p",
+            "Updated On": "%Y %b %d %I:%M:%S %p",
+        },
     )
-    df["Updated On"] = pd.to_datetime(
-        df["Updated On"], format="%Y %b %d %I:%M:%S %p", errors="coerce"
-    )
-    return df
