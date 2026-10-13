@@ -185,9 +185,41 @@ Sin embargo, en el 2015 era el área más poblada de Chicago al igual que una de
 Una problemática interesante para analizar sería detectar, dado un delito reportado, si el mismo terminará en un arresto o no. Esto puede ayudar a analizar que características de un delito son las más relevantes a la hora de que se produzca un arresto (y en qué casos y qué zonas hay una tasa más baja de resolción).
 La variable target en este caso sería 'Arrest', una variable binaria. Sería un problema de clasificación dónde las categorías son: delito que terminó en arresto y delito que no terminó en arresto.
 
-# Preprocesamiento (TODO, lo haría en notebook separado)
+# Preprocesamiento
 
-Eliminar columnas irrelevantes:
+Eliminar variables obviamente irrelevantes:
 'Updated On': posterior al hecho
 'ID' y 'Case Number': identificadores
 'Year': redundante dado que es un valor constante
+
+Las variables 'Latitude', 'Longitude' y 'Location' se consideran irrelevantes teniendo ya la misma información en 'Y Coordinate' y 'X Coordinate'
+
+# Train/Test Split
+
+Se dividen los datos de training y testing con un ratio de 0.8/0.2
+
+# Resumen de decisiones para Outliers
+
+Las decisiones sobre los outliers detectados en el EDA:
+
+| Outlier                                | Decisión                                                           | Justificación                                                               |
+| -------------------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------- |
+| Community Area 25 (Austin)             | Se conserva                                                        | Es un valor real: el área más poblada y de las más pobres en 2015.          |
+| Coordenadas fuera de Chicago           | No hay                                                             | Ninguna coordenada cae fuera del rectángulo de la ciudad.                   |
+| Hora 00:00 y día 1 (valor por defecto) | Se conserva la fila + indicadores `hora_default` y `fecha_default` | No son aleatorios y tienen una tasa de arresto ~4 veces menor (notebook 2). |
+| Días con muchos delitos (IQR)          | Se conservan                                                       | Caen en días 1 de mes: los explica el valor por defecto, ya marcado.        |
+
+# Codificación
+
+Contamos mayoritariamente con variables categóricas. Se tiene en cuenta su cardinalidad (se puede ver en el archivo de EDA) a la hora de codificarlas.
+
+| Variable               | # Categorías | Técnica                               | Razón                                                                                                            |
+| ---------------------- | ------------ | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `Primary Type`         | 31           | One-hot                               | Cardinalidad baja y sin orden                                                                                    |
+| `Location Description` | 116          | One-hot con agrupación de específicas | Las categorías con menos de 0.5% de los registros se agrupan en una sola para evitar muchas columnas casi vacías |
+| `Tipo_Desc`            | ~360         | Target encoding                       | Cardinalidad alta, mucha relación con variable target                                                            |
+| `Beat`                 | 274          | Target encoding                       | Cardinalidad alta                                                                                                |
+| `Block`                | ~27000       | Target encoding                       | Cardinalidad extrema                                                                                             |
+| `Domestic`             | 2            | Binaria                               | Booleana, 0 => False, 1 => True                                                                                  |
+
+Target encoding reemplaza cada categoría por la tasa de arresto de esa categoría según el train set. Es la opción más informativa, compacta y efectiva para casos de alta cardinalidad. Corre el riesgo de overfitting.
