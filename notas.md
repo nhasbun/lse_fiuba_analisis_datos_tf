@@ -194,22 +194,119 @@ Eliminar variables obviamente irrelevantes:
 
 Las variables 'Latitude', 'Longitude' y 'Location' se consideran irrelevantes teniendo ya la misma información en 'Y Coordinate' y 'X Coordinate'
 
+'Date' se reemplaza por 'Month', 'Day', 'Hour' y 'Weekday'.
+
+Antes de eliminar 'Date' creamos dos indicadores:
+
+- hora_default: el hecho figura a las 00:00 exactas.
+- fecha_default: figura el día 1 del mes.
+
+No eliminamos esas filas porque no son errores aleatorios, corresponden sobre todo a fraudes, delitos sexuales y contra menores. Eliminarlas sesgaría los datos.
+
+Los 'Case Number' repetidos corresponden a homicidios múltiples (27 casos, 50 filas) y cada fila es una víctima.
+Evaluamos crear una variable NUM_VICTIMS, pero los homicidios múltiples son un 10% de los homicidios y un 0.01% de los casos totales.
+
+Unimos los casos con "Primary Type" 'CRIM SEXUAL ASSAULT' y 'CRIMINAL SEXUAL ASSAULT' ya que compartían el mismo código FBI y se solapaban sus códigos IUCR. Fueron unificados en una categoría llamada 'SEXUAL ASSAULT'.
+
+Se eliminó el único registro tipo 'NON-CRIMINAL' por ser ruido innecesario.
+
+Medimos la asociación (V de Cramér con corrección de Bergsma) entre la combinación Primary Type + Description y cada código.
+
+| Variable                   | Cardinalidad |
+| :------------------------- | -----------: |
+| Primary Type + Description |          366 |
+| FBI Code                   |           26 |
+| IUCR                       |          328 |
+
+Ambos códigos tienen un aosiciación casi perfecta al ser combinados y cada combinación mapea a un único código. "FBI Code" no aporta información nueva comparado con "Primary Type" que es más granular.
+
+La combinación tiene más señal que los códigos por separado
+
+| Variable                   | V con Arrest |
+| :------------------------- | -----------: |
+| Primary Type + Description |        0.733 |
+| Primary Type               |        0.649 |
+| FBI Code                   |        0.645 |
+
+Las variables de localidad también se vuelven redundantes y están fuertement asociadas entre sí (con la excepción de "Location Description").
+"Beat" y "Disctrict" tienen V=0.98, pero "Beat" es más granular.
+Ward y Community Area se solapan (V = 0.71) sin anidarse
+
+Asociación con el target:
+Asociación con el target:
+
+| Variable             | V con Arrest (corregida) |
+| :------------------- | -----------------------: |
+| Block                |                    0.334 |
+| Location Description |                    0.290 |
+| Beat                 |                    0.224 |
+| Community Area       |                    0.191 |
+| Ward                 |                    0.179 |
+| District             |                    0.179 |
+
+"Location Description" presenta dos problemas:
+
+**Normalización.** Hay categorías repetidas por diferencias de puntuación (ej: "VACANT LOT/LAND" y "VACANT LOT / LAND"). Pasamos todo a mayúsculas, reemplazamos los signos de puntuación por un espacio y unificamos los espacios repetidos. Algunos casos puntuales (abreviaturas o redacciones distintas) se revisaron a mano. Las categorías bajan de 140 a 116.
+
+**Nulos.** 620 filas no tienen "Location Description". Los casos de fraude financiero/online representan 616/620 nulos (99.35%). Es un faltante estructural: el hecho no ocurre en un lugar físico. Lo reemplazamos por una categoría propia "ONLINE/UNKNOWN".
+
 # Train/Test Split
 
-Se dividen los datos de training y testing con un ratio de 0.8/0.2
+Se dividen los datos de training y testing con un ratio de 0.8/0.2 con split estratificado para que se mantenga la proporción de arrestos.
 
-# Resumen de decisiones para Outliers
+# Selección de variables
+
+"Beat" tiene la granularidad más pequeña y no tiene faltantes: la usamos para imputar las coordenadas (promedio de cada Beat). Para comparar las variables geográficas, discretizamos las coordenadas en grillas de 100, 225, 400 y 900 celdas.
+
+| Variable       | Información mutua con Arrest |
+| :------------- | ---------------------------: |
+| Grilla 900     |                     0.026356 |
+| Beat           |                     0.025492 |
+| Grilla 400     |                     0.022234 |
+| Grilla 225     |                     0.019619 |
+| Community Area |                     0.018506 |
+| Grilla 100     |                     0.017112 |
+| Ward           |                     0.016058 |
+| District       |                     0.015589 |
+
+Las variables con mayor cardinalidad resultan ser más relevantes para el problema.
+
+Con V de Cramér, "IUCR", "FBI Code" y "Primary Type" están fuertemente relacionadas ya que todas describen el tipo de crimen.
+
+| Variable     | Información mutua con Arrest |
+| :----------- | ---------------------------: |
+| IUCR         |                     0.280932 |
+| Primary Type |                     0.211044 |
+| FBI Code     |                     0.209335 |
+
+`IUCR` es la que presenta más relevancia con respecto al target.
+
+## Manejo de nulos
+
+- Antes de imputar creamos coord_faltante. La falta de coordenadas tiene una razón (protección de la víctima) y es información relevante.
+- Coordenadas: usamos la media de cada Beat.
+- Ward y Community Area: moda de cada Beat ya que son categóricas.
+- Los valores se calculan con train y se aplican a train y test. Si un Beat de test no aparece en train, se usa el valor global de train.
+
+## Resumen de decisiones para Outliers
 
 Las decisiones sobre los outliers detectados en el EDA:
 
-| Outlier                                | Decisión                                                           | Justificación                                                               |
-| -------------------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------- |
-| Community Area 25 (Austin)             | Se conserva                                                        | Es un valor real: el área más poblada y de las más pobres en 2015.          |
-| Coordenadas fuera de Chicago           | No hay                                                             | Ninguna coordenada cae fuera del rectángulo de la ciudad.                   |
-| Hora 00:00 y día 1 (valor por defecto) | Se conserva la fila + indicadores `hora_default` y `fecha_default` | No son aleatorios y tienen una tasa de arresto ~4 veces menor (notebook 2). |
-| Días con muchos delitos (IQR)          | Se conservan                                                       | Caen en días 1 de mes: los explica el valor por defecto, ya marcado.        |
+| Outlier                                  | Decisión                                                                | Justificación                                                        |
+| ---------------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Community Area 25 (Austin)               | Se conserva                                                             | Es un valor real, el área más poblada y de las más pobres en 2015.   |
+| Coordenadas fuera de Chicago             | No hay                                                                  | Ninguna coordenada cae fuera del rectángulo de la ciudad.            |
+| Hora 00:00 y día 1 (valores por defecto) | Se conserva la fila y se suman indicadores hora_default y fecha_default | No son aleatorios y tienen una tasa de arresto casi 4 veces menor.   |
+| Días con muchos delitos (IQR)            | Se conservan                                                            | Caen en días 1 de mes, los explica el valor por defecto, ya marcado. |
 
-# Codificación
+# Feature Engineering
+
+- Variables cíclicas: hora, mes, día del mes y día de la semana se codifican con seno y coseno para mantener su ciclicidad.
+- Tipo_Desc: combinación de Primary Type + Description, la más asociada al target (V(Arrest) = 0.733)
+- Se descarta Description (queda dentro de Tipo_Desc)
+- Se decartan Ward y Community Area, redundantes con Beat y Block (V = 0.71–0.98)
+
+## Codificación
 
 Contamos mayoritariamente con variables categóricas. Se tiene en cuenta su cardinalidad (se puede ver en el archivo de EDA) a la hora de codificarlas.
 
@@ -217,9 +314,71 @@ Contamos mayoritariamente con variables categóricas. Se tiene en cuenta su card
 | ---------------------- | ------------ | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | `Primary Type`         | 31           | One-hot                               | Cardinalidad baja y sin orden                                                                                    |
 | `Location Description` | 116          | One-hot con agrupación de específicas | Las categorías con menos de 0.5% de los registros se agrupan en una sola para evitar muchas columnas casi vacías |
-| `Tipo_Desc`            | ~360         | Target encoding                       | Cardinalidad alta, mucha relación con variable target                                                            |
+| `Tipo_Desc`            | 364          | Target encoding                       | Cardinalidad alta, mucha relación con variable target                                                            |
 | `Beat`                 | 274          | Target encoding                       | Cardinalidad alta                                                                                                |
 | `Block`                | ~27000       | Target encoding                       | Cardinalidad extrema                                                                                             |
 | `Domestic`             | 2            | Binaria                               | Booleana, 0 => False, 1 => True                                                                                  |
 
-Target encoding reemplaza cada categoría por la tasa de arresto de esa categoría según el train set. Es la opción más informativa, compacta y efectiva para casos de alta cardinalidad. Corre el riesgo de overfitting.
+Target encoding reemplaza cada categoría por la tasa de arresto de esa categoría según el train set. Es la opción más informativa, compacta y efectiva para casos de alta cardinalidad. Corre el riesgo de overfitting. TargetEncoder usa validación cruzada para mitigar este efecto.
+
+Quedan 54 columnas
+
+| Tipo            | Columnas |
+| :-------------- | -------: |
+| One-hot         |       37 |
+| Target encoding |        3 |
+| Numéricas       |       10 |
+| Binarias        |        4 |
+
+Location Description pasa de 114 categorías en train a 21 columnas one-hot encoded.
+
+En Tipo_Desc_te se hace notoria la separación de las clases: los delitos con arresto se concentran en valores cercanos a 1 y los sin arresto cerca de 0.
+
+## Scaling
+
+Las coordenadas tienen valores de orden de magnitud mucho mayor al resto de las variables. Usamos MinMaxScaler para llevarlas a [0,1]. No se estandarizan ya que estan todas dentro de la ciudad y no hay outliers. El scaler se ajusta con train pero se usa para testing también.
+
+## Balance
+
+Hay arresto en el 26.5% de los casos, un desbalance moderado, que puede incentivar al modelo a predecir "Sin arresto".
+Dado que contamos con +200 mil filas, elegimos usar undersampling para balancear el training set, manteniendo +100 mil filas sin inventar datos (como en el oversampling). Se aplica solo a train, para que test refleje la realidad.
+
+| Conjunto            |   Filas | Sin arresto | Con arresto |
+| :------------------ | ------: | ----------: | ----------: |
+| Train desbalanceado | 211,905 |       73.5% |       26.5% |
+| Train balanceado    | 112,104 |       50.0% |       50.0% |
+| Test                |  52,977 |       73.5% |       26.5% |
+
+# Reducción de dimensionalidad con PCA
+
+Antes de aplicar PCA estandarizamos los datos, porque es sensible a la escala. Si no, las variables con mayor varianza domina.
+
+| Varianza explicada | Componentes | % de las columnas |
+| :----------------- | ----------: | ----------------: |
+| 70%                |    31 de 54 |               57% |
+| 80%                |    36 de 54 |               67% |
+| 90%                |    42 de 54 |               78% |
+
+PC1 explica el 5.4% de la varianza. PC1 + PC2, el 9.3%.
+La varianza está muy repartida, con un umbral del 80%, la reducción sería del 33% de las columnas.
+
+Ventajas:
+
+- Menos columnas significa que puedo acelerar el proceso de entrenamiento
+- Los componentes no están correlacionados, así que elimino redundancia entre los features
+
+Desventajas:
+
+- PCA transforma los features originales y los hace más díficil interpretar
+- Podemos tener pérdida de información relevante para predecir si hubo arresto o no
+- La compresión no es lo suficientemente grande: casi todas las features son categóricas en nuestro caso y tienen poca correlacioón lineal entre sí
+
+Conclusión
+En nuestro caso, parece que PCA no es lo suficientemente ventajoso como para utilizarlo. 54 columnas no presenta un problema de dimensionalidad tan grande y se logró eliminar mucha de la redundancia gracias al EDA y preprocesamiento previo
+
+# Conclusiones
+
+1. **El tipo de delito casi define el arresto:** los delitos "reactivos" se registran porque hubo una detención (como narcóticos con 99.97% o prostitución con 99.85%). "Tipo_Desc" tiene V = 0.733 con el target. "Block", la variable geográfica más asociada, tiene V = 0.334.
+2. **Los faltantes no son aleatorios:** las coordenadas se ocultan para proteger a las víctimas. Los registros con hora "default" tienen una tasa de arresto de 6.6% contra 26.5% global. Por eso se conservan como indicadores en lugar de eliminarse.
+3. **Hay mucha redundancia:** "FBI Code" y "IUCR" repiten el tipo de delito (V ≈ 1) y las geografías están anidadas ("Beat" y "District" con V = 0.98). Medir la asociación permitió descartar columnas sin perder señal.
+4. **PCA no conviene en este dataset:** con features casi todos categóricos la varianza está muy repartida: hacen falta 36 de 54 componentes para el 80%.
